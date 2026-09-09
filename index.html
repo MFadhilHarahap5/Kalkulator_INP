@@ -133,6 +133,11 @@
                 </table>
             </div>
         </div>
+
+        <!-- Watermark / Footer -->
+        <footer class="mt-10 pt-4 border-t border-slate-200 text-center text-xs text-slate-400">
+            <p>Dikembangkan oleh <span class="font-semibold text-slate-600">Muhammad Fadhil Harahap</span> • <a href="mailto:agathisalba3@gmail.com" class="hover:text-emerald-600 underline transition-colors">agathisalba3@gmail.com</a></p>
+        </footer>
     </div>
 
     <script>
@@ -247,7 +252,6 @@
             const A_plot = parseFloat(document.getElementById('luasPlot').value) || 1;
             const A_total_ha = (N_plot * A_plot) / 10000.0;
 
-            // Aggregasi Otomatis berdasarkan Spesies
             let speciesMap = {};
 
             listData.forEach(item => {
@@ -272,7 +276,6 @@
 
             const speciesList = Object.values(speciesMap);
 
-            // Hitung Nilai Absolut
             let sumK = 0, sumF = 0, sumD = 0;
 
             speciesList.forEach(sp => {
@@ -286,7 +289,6 @@
                 sumD += sp.D;
             });
 
-            // Hitung Nilai Relatif & INP
             const isSemaiPancang = (tingkat === 'Semai' || tingkat === 'Pancang');
 
             const hasilArray = speciesList.map(sp => {
@@ -309,14 +311,12 @@
                 };
             });
 
-            // Tampilkan Ringkasan Parameter Rumus
             document.getElementById('ringkasanRumus').innerHTML = `
                 <p><b>Parameter Perhitungan:</b> Luas Total Contoh = <b>${A_total_ha} ha</b> (${N_plot} plot × ${A_plot} m² ÷ 10.000).</p>
                 <p><b>Rumus Digunakan:</b> Kerapatan = Jumlah Indv / Luas Total (ha), Frekuensi = Plot Ditemukan / Total Plot (${N_plot}), Dominansi = Total LBDS (m²) / Luas Total (ha).</p>
                 <p><b>Total Komunitas:</b> ∑K = ${sumK.toFixed(2)}, ∑F = ${sumF.toFixed(4)}, ∑D = ${sumD.toFixed(4)} m²/ha.</p>
             `;
 
-            // Tampilkan Hasil Tabel
             const tbody = document.getElementById('tabelHasilBody');
             tbody.innerHTML = '';
 
