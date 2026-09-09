@@ -1,0 +1,151 @@
+# 1. Install pustaka yang dibutuhkan
+!pip install -q gradio pandas openpyxl numpy
+
+import gradio as gr
+import pandas as pd
+import numpy as np
+
+def ganti_nama_kolom_fleksibel(df):
+    """Mengenali variasi nama kolom dari Excel pengakses secara otomatis"""
+    mapping = {}
+    for col in df.columns:
+        col_clean = str(col).strip().lower()
+        
+        # Deteksi Kolom Plot
+        if col_clean in ['no plot', 'no. plot', 'plot', 'nomor plot', 'id plot', 'no_plot']:
+            mapping[col] = 'No Plot'
+        # Deteksi Kolom Nama Spesies
+        elif col_clean in ['nama spesies', 'spesies', 'nama jenis', 'jenis', 'nama pohon', 'pohon']:
+            mapping[col] = 'Nama Spesies'
+        # Deteksi Kolom Diameter
+        elif col_clean in ['diameter (cm)', 'diameter', 'd (cm)', 'dbh (cm)', 'dbh']:
+            mapping[col] = 'Diameter (cm)'
+        # Deteksi Kolom Jumlah Individu (Opsional)
+        elif col_clean in ['jumlah individu', 'jumlah', 'individu', 'n', 'n (ind)']:
+            mapping[col] = 'Jumlah Individu'
+            
+    return df.rename(columns=mapping)
+
+def proses_inp_full_otomatis(file_obj, tingkat, jumlah_plot, luas_plot):
+    if file_obj is None:
+        return None, None, "⚠️ Silakan unggah file Excel terlebih dahulu."
+    
+    try:
+        # Baca file Excel
+        df = pd.read_excel(file_obj.name)
+        
+        # Auto-mapping nama kolom agar toleran terhadap typo/variasi
+        df = ganti_nama_kolom_fleksibel(df)
+        
+        # Validasi kolom wajib minimal
+        kolom_wajib = ["No Plot", "Nama Spesies", "Diameter (cm)"]
+        missing_cols = [col for col in kolom_wajib if col not in df.columns]
+        
+        if missing_cols:
+            kolom_terbaca = ", ".join([f"'{c}'" for c in df.columns])
+            return None, None, f"❌ Kolom {missing_cols} tidak ditemukan! Kolom di Excel kamu yang terbaca: [{kolom_terbaca}]"
+        
+        # Jika kolom 'Jumlah Individu' tidak ada, otomatis diisi 1 per baris
+        if "Jumlah Individu" not in df.columns:
+            df["Jumlah Individu"] = 1
+        else:
+            df["Jumlah Individu"] = pd.to_numeric(df["Jumlah Individu"], errors="coerce").fillna(1)
+        
+        # Bersihkan data diameter
+        df["Diameter (cm)"] = pd.to_numeric(df["Diameter (cm)"], errors="coerce").fillna(0)
+        
+        # Hitung LBDS per baris data
+        df["LBDS_Baris"] = (np.pi / 4.0) * ((df["Diameter (cm)"] / 100.0) ** 2) * df["Jumlah Individu"]
+        
+        # Rekapitulasi Otomatis per Spesies
+        df_rekap = df.groupby("Nama Spesies").agg(
+            Jumlah_Individu=("Jumlah Individu", "sum"),
+            Plot_Ditemukan=("No Plot", "nunique"),
+            LBDS_Total=("LBDS_Baris", "sum")
+        ).reset_index()
+        
+        # Hitung Luas Total Seluruh Plot (ha)
+        luas_total_ha = (jumlah_plot * luas_plot) / 10000.0
+        
+        # Perhitungan Absolut
+        df_rekap["Kerapatan (K)"] = df_rekap["Jumlah_Individu"] / luas_total_ha if luas_total_ha > 0 else 0
+        df_rekap["Frekuensi (F)"] = df_rekap["Plot_Ditemukan"] / jumlah_plot if jumlah_plot > 0 else 0
+        df_rekap["Dominansi (D)"] = df_rekap["LBDS_Total"] / luas_total_ha if luas_total_ha > 0 else 0
+        
+        # Total Komunitas
+        tot_k = df_rekap["Kerapatan (K)"].sum()
+        tot_f = df_rekap["Frekuensi (F)"].sum()
+        tot_d = df_rekap["Dominansi (D)"].sum()
+        
+        # Perhitungan Relatif & INP
+        df_rekap["KR (%)"] = (df_rekap["Kerapatan (K)"] / tot_k * 100) if tot_k > 0 else 0
+        df_rekap["FR (%)"] = (df_rekap["Frekuensi (F)"] / tot_f * 100) if tot_f > 0 else 0
+        
+        if tingkat in ["Semai", "Pancang"]:
+            df_rekap["Dominansi (D)"] = 0.0
+            df_rekap["DR (%)"] = 0.0
+            df_rekap["INP (%)"] = df_rekap["KR (%)"] + df_rekap["FR (%)"]
+        else:
+            df_rekap["DR (%)"] = (df_rekap["Dominansi (D)"] / tot_d * 100) if tot_d > 0 else 0
+            df_rekap["INP (%)"] = df_rekap["KR (%)"] + df_rekap["FR (%)"] + df_rekap["DR (%)"]
+        
+        # Rapikan nama kolom hasil
+        df_rekap.rename(columns={
+            "Jumlah_Individu": "Total Individu (Otomatis)",
+            "Plot_Ditemukan": "Plot Ditemukan (Otomatis)"
+        }, inplace=True)
+        
+        # Order & pembulatan
+        kolom_tampil = ["Nama Spesies", "Total Individu (Otomatis)", "Plot Ditemukan (Otomatis)", 
+                        "Kerapatan (K)", "KR (%)", "Frekuensi (F)", "FR (%)", 
+                        "Dominansi (D)", "DR (%)", "INP (%)"]
+        
+        df_out = df_rekap[kolom_tampil].round(2)
+        
+        # Simpan file Excel baru
+        path_output = "Hasil_INP_Full_Otomatis.xlsx"
+        df_out.to_excel(path_output, index=False)
+        
+        return df_out, path_output, "✅ Berhasil! Individu, Plot, dan INP telah dihitung otomatis."
+        
+    except Exception as e:
+        return None, None, f"❌ Terjadi kesalahan: {str(e)}"
+
+# Antarmuka Web Gradio
+with gr.Blocks(title="Kalkulator INP Full Otomatis") as demo:
+    gr.Markdown("# 🌲 Kalkulator INP Vegetasi (Auto-Engine Toleran)")
+    
+    with gr.Accordion("📌 FORMAT EXCEL SANGAT FLEKSIBEL", open=True):
+        gr.Markdown("""
+        Cukup masukkan **data mentah setiap pohon** di lapangan baris demi baris.
+        
+        | No Plot *(atau Plot)* | Nama Spesies *(atau Jenis)* | Diameter (cm) *(atau Diameter)* |
+        | :--- | :--- | :--- |
+        | 1 | Jati | 25 |
+        | 1 | Mahoni | 18 |
+        | 2 | Jati | 30 |
+        
+        *Sistem sekarang otomatis mengenali judul kolom seperti **Plot**, **No. Plot**, **Nomor Plot**, **Spesies**, **Jenis**, dll.*
+        """)
+
+    with gr.Row():
+        with gr.Column():
+            file_input = gr.File(label="Upload Excel Data Lapangan (.xlsx)", file_types=[".xlsx"])
+            tingkat = gr.Dropdown(["Semai", "Pancang", "Tiang", "Pohon"], value="Pohon", label="Tingkat Pertumbuhan")
+            jumlah_plot = gr.Number(label="Jumlah Plot Total", value=10)
+            luas_plot = gr.Number(label="Luas per Plot (m²)", value=400)
+            btn = gr.Button("Proses Data Lapangan", variant="primary")
+            
+        with gr.Column():
+            status_txt = gr.Textbox(label="Status Perhitungan")
+            file_output = gr.File(label="Download Hasil Rekap Excel (.xlsx)")
+
+    tabel_preview = gr.Dataframe(label="Hasil Rekapitulasi & INP Spesies")
+
+    btn.click(
+        proses_inp_full_otomatis,
+        inputs=[file_input, tingkat, jumlah_plot, luas_plot],
+        outputs=[tabel_preview, file_output, status_txt]
+    )
+
+demo.launch(share=True)
