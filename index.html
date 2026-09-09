@@ -1,151 +1,286 @@
-# 1. Install pustaka yang dibutuhkan
-!pip install -q gradio pandas openpyxl numpy
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalkulator INP Vegetasi</title>
+    <!-- Tailwind CSS untuk Desain -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS untuk Membaca & Mengunduh Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans p-4 md:p-8">
+    <div class="max-w-5xl mx-auto bg-white rounded-xl shadow-md p-6 md:p-8">
+        <h1 class="text-2xl md:text-3xl font-bold text-emerald-700 mb-2">🌲 Kalkulator INP Vegetasi (Auto-Engine)</h1>
+        <p class="text-gray-600 mb-6">Unggah data mentah pencatatan lapangan kamu. Sistem akan menghitung total individu, plot ditemukan, dan seluruh parameter INP secara otomatis.</p>
 
-import gradio as gr
-import pandas as pd
-import numpy as np
+        <!-- Informasi Ketentuan Excel -->
+        <details class="mb-6 bg-emerald-50 border border-emerald-200 rounded-lg p-4 cursor-pointer" open>
+            <summary class="font-bold text-emerald-800">📌 FORMAT EXCEL SANGAT FLEKSIBEL (Klik untuk menutup)</summary>
+            <div class="mt-3 text-sm text-gray-700 space-y-2">
+                <p>Masukkan data mentah setiap pohon yang ditemukan di lapangan baris demi baris:</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse border border-emerald-300 my-2 bg-white">
+                        <thead>
+                            <tr class="bg-emerald-100">
+                                <th class="p-2 border">No Plot</th>
+                                <th class="p-2 border">Nama Spesies</th>
+                                <th class="p-2 border">Diameter (cm)</th>
+                                <th class="p-2 border">Jumlah Individu (Opsional)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td class="p-2 border">1</td><td class="p-2 border">Jati</td><td class="p-2 border">25</td><td class="p-2 border">1</td></tr>
+                            <tr><td class="p-2 border">1</td><td class="p-2 border">Mahoni</td><td class="p-2 border">18</td><td class="p-2 border">1</td></tr>
+                            <tr><td class="p-2 border">2</td><td class="p-2 border">Jati</td><td class="p-2 border">30</td><td class="p-2 border">1</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p>💡 <em>Sistem otomatis mengenali nama kolom seperti <b>Plot</b>, <b>No. Plot</b>, <b>Spesies</b>, <b>Jenis</b>, <b>Diameter</b>, dll.</em></p>
+            </div>
+        </details>
 
-def ganti_nama_kolom_fleksibel(df):
-    """Mengenali variasi nama kolom dari Excel pengakses secara otomatis"""
-    mapping = {}
-    for col in df.columns:
-        col_clean = str(col).strip().lower()
-        
-        # Deteksi Kolom Plot
-        if col_clean in ['no plot', 'no. plot', 'plot', 'nomor plot', 'id plot', 'no_plot']:
-            mapping[col] = 'No Plot'
-        # Deteksi Kolom Nama Spesies
-        elif col_clean in ['nama spesies', 'spesies', 'nama jenis', 'jenis', 'nama pohon', 'pohon']:
-            mapping[col] = 'Nama Spesies'
-        # Deteksi Kolom Diameter
-        elif col_clean in ['diameter (cm)', 'diameter', 'd (cm)', 'dbh (cm)', 'dbh']:
-            mapping[col] = 'Diameter (cm)'
-        # Deteksi Kolom Jumlah Individu (Opsional)
-        elif col_clean in ['jumlah individu', 'jumlah', 'individu', 'n', 'n (ind)']:
-            mapping[col] = 'Jumlah Individu'
+        <!-- Input Parameters -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 bg-slate-50 p-4 rounded-lg border">
+            <div>
+                <label class="block text-sm font-semibold mb-1">Tingkat Pertumbuhan</label>
+                <select id="tingkat" class="w-full p-2 border rounded-md bg-white">
+                    <option value="Semai">Semai (KR + FR)</option>
+                    <option value="Pancang">Pancang (KR + FR)</option>
+                    <option value="Tiang">Tiang (KR + FR + DR)</option>
+                    <option value="Pohon" selected>Pohon (KR + FR + DR)</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold mb-1">Jumlah Plot Total</label>
+                <input type="number" id="jumlahPlot" value="10" class="w-full p-2 border rounded-md">
+            </div>
+            <div>
+                <label class="block text-sm font-semibold mb-1">Luas per Plot (m²)</label>
+                <input type="number" id="luasPlot" value="400" class="w-full p-2 border rounded-md">
+            </div>
+        </div>
+
+        <!-- Upload Field -->
+        <div class="mb-6 p-6 border-2 border-dashed border-emerald-400 rounded-lg bg-emerald-50/50 text-center">
+            <input type="file" id="excelFile" accept=".xlsx, .xls" class="hidden" onchange="handleFile(event)">
+            <label for="excelFile" class="cursor-pointer bg-emerald-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-emerald-700 inline-block">
+                📁 Unggah Excel Data Lapangan (.xlsx)
+            </label>
+            <p id="namaFile" class="text-sm text-gray-500 mt-2">Belum ada file yang dipilih</p>
+        </div>
+
+        <!-- Buttons -->
+        <div class="flex flex-wrap gap-3 mb-6">
+            <button id="btnHitung" onclick="prosesPerhitungan()" disabled class="bg-gray-400 text-white px-6 py-2.5 rounded-lg font-bold cursor-not-allowed">
+                Proses Data Lapangan
+            </button>
+            <button id="btnDownload" onclick="downloadExcel()" disabled class="bg-gray-400 text-white px-6 py-2.5 rounded-lg font-bold cursor-not-allowed">
+                📥 Unduh Hasil Rekap Excel
+            </button>
+        </div>
+
+        <!-- Status Message -->
+        <div id="statusBox" class="hidden p-3 rounded-lg text-sm mb-6 font-medium"></div>
+
+        <!-- Preview Table -->
+        <div id="areaHasil" class="hidden">
+            <h2 class="text-xl font-bold text-emerald-800 mb-3">Hasil Rekapitulasi & INP Spesies</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse border border-gray-300 min-w-[800px]">
+                    <thead>
+                        <tr class="bg-slate-800 text-white text-sm">
+                            <th class="p-2 border">Nama Spesies</th>
+                            <th class="p-2 border">Total Individu</th>
+                            <th class="p-2 border">Plot Ditemukan</th>
+                            <th class="p-2 border">K (ind/ha)</th>
+                            <th class="p-2 border">KR (%)</th>
+                            <th class="p-2 border">F</th>
+                            <th class="p-2 border">FR (%)</th>
+                            <th class="p-2 border">D (m²/ha)</th>
+                            <th class="p-2 border">DR (%)</th>
+                            <th class="p-2 border bg-emerald-800">INP (%)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabelHasilBody" class="text-sm"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let rawJsonData = null;
+        let processedResultData = null;
+
+        function handleFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('namaFile').innerText = `File terpilih: ${file.name}`;
             
-    return df.rename(columns=mapping)
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                const data = new Uint8Array(evt.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                
+                rawJsonData = XLSX.utils.sheet_to_json(firstSheet);
+                
+                const btnHitung = document.getElementById('btnHitung');
+                btnHitung.disabled = false;
+                btnHitung.className = "bg-emerald-600 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-emerald-700 cursor-pointer";
+                
+                showStatus("✅ File berhasil dimuat! Klik tombol 'Proses Data Lapangan'.", "success");
+            };
+            reader.readAsArrayBuffer(file);
+        }
 
-def proses_inp_full_otomatis(file_obj, tingkat, jumlah_plot, luas_plot):
-    if file_obj is None:
-        return None, None, "⚠️ Silakan unggah file Excel terlebih dahulu."
-    
-    try:
-        # Baca file Excel
-        df = pd.read_excel(file_obj.name)
-        
-        # Auto-mapping nama kolom agar toleran terhadap typo/variasi
-        df = ganti_nama_kolom_fleksibel(df)
-        
-        # Validasi kolom wajib minimal
-        kolom_wajib = ["No Plot", "Nama Spesies", "Diameter (cm)"]
-        missing_cols = [col for col in kolom_wajib if col not in df.columns]
-        
-        if missing_cols:
-            kolom_terbaca = ", ".join([f"'{c}'" for c in df.columns])
-            return None, None, f"❌ Kolom {missing_cols} tidak ditemukan! Kolom di Excel kamu yang terbaca: [{kolom_terbaca}]"
-        
-        # Jika kolom 'Jumlah Individu' tidak ada, otomatis diisi 1 per baris
-        if "Jumlah Individu" not in df.columns:
-            df["Jumlah Individu"] = 1
-        else:
-            df["Jumlah Individu"] = pd.to_numeric(df["Jumlah Individu"], errors="coerce").fillna(1)
-        
-        # Bersihkan data diameter
-        df["Diameter (cm)"] = pd.to_numeric(df["Diameter (cm)"], errors="coerce").fillna(0)
-        
-        # Hitung LBDS per baris data
-        df["LBDS_Baris"] = (np.pi / 4.0) * ((df["Diameter (cm)"] / 100.0) ** 2) * df["Jumlah Individu"]
-        
-        # Rekapitulasi Otomatis per Spesies
-        df_rekap = df.groupby("Nama Spesies").agg(
-            Jumlah_Individu=("Jumlah Individu", "sum"),
-            Plot_Ditemukan=("No Plot", "nunique"),
-            LBDS_Total=("LBDS_Baris", "sum")
-        ).reset_index()
-        
-        # Hitung Luas Total Seluruh Plot (ha)
-        luas_total_ha = (jumlah_plot * luas_plot) / 10000.0
-        
-        # Perhitungan Absolut
-        df_rekap["Kerapatan (K)"] = df_rekap["Jumlah_Individu"] / luas_total_ha if luas_total_ha > 0 else 0
-        df_rekap["Frekuensi (F)"] = df_rekap["Plot_Ditemukan"] / jumlah_plot if jumlah_plot > 0 else 0
-        df_rekap["Dominansi (D)"] = df_rekap["LBDS_Total"] / luas_total_ha if luas_total_ha > 0 else 0
-        
-        # Total Komunitas
-        tot_k = df_rekap["Kerapatan (K)"].sum()
-        tot_f = df_rekap["Frekuensi (F)"].sum()
-        tot_d = df_rekap["Dominansi (D)"].sum()
-        
-        # Perhitungan Relatif & INP
-        df_rekap["KR (%)"] = (df_rekap["Kerapatan (K)"] / tot_k * 100) if tot_k > 0 else 0
-        df_rekap["FR (%)"] = (df_rekap["Frekuensi (F)"] / tot_f * 100) if tot_f > 0 else 0
-        
-        if tingkat in ["Semai", "Pancang"]:
-            df_rekap["Dominansi (D)"] = 0.0
-            df_rekap["DR (%)"] = 0.0
-            df_rekap["INP (%)"] = df_rekap["KR (%)"] + df_rekap["FR (%)"]
-        else:
-            df_rekap["DR (%)"] = (df_rekap["Dominansi (D)"] / tot_d * 100) if tot_d > 0 else 0
-            df_rekap["INP (%)"] = df_rekap["KR (%)"] + df_rekap["FR (%)"] + df_rekap["DR (%)"]
-        
-        # Rapikan nama kolom hasil
-        df_rekap.rename(columns={
-            "Jumlah_Individu": "Total Individu (Otomatis)",
-            "Plot_Ditemukan": "Plot Ditemukan (Otomatis)"
-        }, inplace=True)
-        
-        # Order & pembulatan
-        kolom_tampil = ["Nama Spesies", "Total Individu (Otomatis)", "Plot Ditemukan (Otomatis)", 
-                        "Kerapatan (K)", "KR (%)", "Frekuensi (F)", "FR (%)", 
-                        "Dominansi (D)", "DR (%)", "INP (%)"]
-        
-        df_out = df_rekap[kolom_tampil].round(2)
-        
-        # Simpan file Excel baru
-        path_output = "Hasil_INP_Full_Otomatis.xlsx"
-        df_out.to_excel(path_output, index=False)
-        
-        return df_out, path_output, "✅ Berhasil! Individu, Plot, dan INP telah dihitung otomatis."
-        
-    except Exception as e:
-        return None, None, f"❌ Terjadi kesalahan: {str(e)}"
+        // Fungsi Helper Mencari Nama Kolom Fleksibel
+        function getColumnValue(row, possibleNames) {
+            const keys = Object.keys(row);
+            for (let key of keys) {
+                const cleanKey = key.toString().trim().toLowerCase();
+                for (let name of possibleNames) {
+                    if (cleanKey === name || cleanKey.includes(name)) {
+                        return row[key];
+                    }
+                }
+            }
+            return null;
+        }
 
-# Antarmuka Web Gradio
-with gr.Blocks(title="Kalkulator INP Full Otomatis") as demo:
-    gr.Markdown("# 🌲 Kalkulator INP Vegetasi (Auto-Engine Toleran)")
-    
-    with gr.Accordion("📌 FORMAT EXCEL SANGAT FLEKSIBEL", open=True):
-        gr.Markdown("""
-        Cukup masukkan **data mentah setiap pohon** di lapangan baris demi baris.
-        
-        | No Plot *(atau Plot)* | Nama Spesies *(atau Jenis)* | Diameter (cm) *(atau Diameter)* |
-        | :--- | :--- | :--- |
-        | 1 | Jati | 25 |
-        | 1 | Mahoni | 18 |
-        | 2 | Jati | 30 |
-        
-        *Sistem sekarang otomatis mengenali judul kolom seperti **Plot**, **No. Plot**, **Nomor Plot**, **Spesies**, **Jenis**, dll.*
-        """)
+        function prosesPerhitungan() {
+            if (!rawJsonData || rawJsonData.length === 0) {
+                showStatus("❌ File Excel kosong atau tidak terbaca!", "error");
+                return;
+            }
 
-    with gr.Row():
-        with gr.Column():
-            file_input = gr.File(label="Upload Excel Data Lapangan (.xlsx)", file_types=[".xlsx"])
-            tingkat = gr.Dropdown(["Semai", "Pancang", "Tiang", "Pohon"], value="Pohon", label="Tingkat Pertumbuhan")
-            jumlah_plot = gr.Number(label="Jumlah Plot Total", value=10)
-            luas_plot = gr.Number(label="Luas per Plot (m²)", value=400)
-            btn = gr.Button("Proses Data Lapangan", variant="primary")
+            const tingkat = document.getElementById('tingkat').value;
+            const jumlahPlot = parseFloat(document.getElementById('jumlahPlot').value) || 0;
+            const luasPlot = parseFloat(document.getElementById('luasPlot').value) || 0;
+            const luasTotalHa = (jumlahPlot * luasPlot) / 10000.0;
+
+            // Grouping data berdasarkan Nama Spesies
+            let speciesMap = {};
+
+            rawJsonData.forEach(row => {
+                let nama = getColumnValue(row, ['nama spesies', 'spesies', 'jenis', 'nama jenis', 'pohon']) || "Tanpa Nama";
+                let plot = getColumnValue(row, ['no plot', 'plot', 'no. plot', 'nomor plot', 'id plot']) || "1";
+                let diameter = parseFloat(getColumnValue(row, ['diameter (cm)', 'diameter', 'dbh'])) || 0;
+                let ind = parseFloat(getColumnValue(row, ['jumlah individu', 'individu', 'jumlah', 'n'])) || 1;
+
+                let dM = diameter / 100.0;
+                let lbdsRow = (Math.PI / 4.0) * (dM * dM) * ind;
+
+                if (!speciesMap[nama]) {
+                    speciesMap[nama] = {
+                        nama: nama,
+                        totalIndividu: 0,
+                        plotsSet: new Set(),
+                        totalLBDS: 0
+                    };
+                }
+
+                speciesMap[nama].totalIndividu += ind;
+                speciesMap[nama].plotsSet.add(plot.toString());
+                speciesMap[nama].totalLBDS += lbdsRow;
+            });
+
+            let speciesList = Object.values(speciesMap);
+
+            if (speciesList.length === 0) {
+                showStatus("❌ Kolom spesies tidak ditemukan di Excel!", "error");
+                return;
+            }
+
+            // Hitung Absolut dan Total Komunitas
+            let totalK = 0, totalF = 0, totalD = 0;
+
+            speciesList.forEach(sp => {
+                sp.k = luasTotalHa > 0 ? sp.totalIndividu / luasTotalHa : 0;
+                sp.f = jumlahPlot > 0 ? sp.plotsSet.size / jumlahPlot : 0;
+                sp.dom = luasTotalHa > 0 ? sp.totalLBDS / luasTotalHa : 0;
+
+                totalK += sp.k;
+                totalF += sp.f;
+                totalD += sp.dom;
+            });
+
+            // Hitung Relatif dan INP
+            processedResultData = speciesList.map(sp => {
+                let kr = totalK > 0 ? (sp.k / totalK) * 100 : 0;
+                let fr = totalF > 0 ? (sp.f / totalF) * 100 : 0;
+                let isSemaiPancang = (tingkat === 'Semai' || tingkat === 'Pancang');
+                let dr = isSemaiPancang ? 0 : (totalD > 0 ? (sp.dom / totalD) * 100 : 0);
+                let inp = kr + fr + dr;
+
+                return {
+                    "Nama Spesies": sp.nama,
+                    "Total Individu": sp.totalIndividu,
+                    "Plot Ditemukan": sp.plotsSet.size,
+                    "Kerapatan (K)": Number(sp.k.toFixed(2)),
+                    "KR (%)": Number(kr.toFixed(2)),
+                    "Frekuensi (F)": Number(sp.f.toFixed(2)),
+                    "FR (%)": Number(fr.toFixed(2)),
+                    "Dominansi (D)": isSemaiPancang ? 0 : Number(sp.dom.toFixed(2)),
+                    "DR (%)": isSemaiPancang ? 0 : Number(dr.toFixed(2)),
+                    "INP (%)": Number(inp.toFixed(2))
+                };
+            });
+
+            renderTable();
+
+            const btnDownload = document.getElementById('btnDownload');
+            btnDownload.disabled = false;
+            btnDownload.className = "bg-blue-600 text-white px-6 py-2.5 rounded-lg font-bold hover:bg-blue-700 cursor-pointer";
+
+            showStatus("✅ Perhitungan selesai! Hasil rekap dan INP telah diperbarui.", "success");
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('tabelHasilBody');
+            tbody.innerHTML = '';
+
+            processedResultData.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50';
+                tr.innerHTML = `
+                    <td class="p-2 border font-medium">${row["Nama Spesies"]}</td>
+                    <td class="p-2 border">${row["Total Individu"]}</td>
+                    <td class="p-2 border">${row["Plot Ditemukan"]}</td>
+                    <td class="p-2 border">${row["Kerapatan (K)"]}</td>
+                    <td class="p-2 border">${row["KR (%)"]}%</td>
+                    <td class="p-2 border">${row["Frekuensi (F)"]}</td>
+                    <td class="p-2 border">${row["FR (%)"]}%</td>
+                    <td class="p-2 border">${row["Dominansi (D)"]}</td>
+                    <td class="p-2 border">${row["DR (%)"]}%</td>
+                    <td class="p-2 border font-bold text-emerald-700 bg-emerald-50">${row["INP (%)"]}%</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('areaHasil').classList.remove('hidden');
+        }
+
+        function downloadExcel() {
+            if (!processedResultData) return;
+            const worksheet = XLSX.utils.json_to_sheet(processedResultData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Hasil Rekap INP");
+            XLSX.writeFile(workbook, "Hasil_Rekap_INP_Vegetasi.xlsx");
+        }
+
+        function showStatus(msg, type) {
+            const box = document.getElementById('statusBox');
+            box.innerText = msg;
+            box.classList.remove('hidden', 'bg-emerald-100', 'text-emerald-800', 'bg-red-100', 'text-red-800');
             
-        with gr.Column():
-            status_txt = gr.Textbox(label="Status Perhitungan")
-            file_output = gr.File(label="Download Hasil Rekap Excel (.xlsx)")
-
-    tabel_preview = gr.Dataframe(label="Hasil Rekapitulasi & INP Spesies")
-
-    btn.click(
-        proses_inp_full_otomatis,
-        inputs=[file_input, tingkat, jumlah_plot, luas_plot],
-        outputs=[tabel_preview, file_output, status_txt]
-    )
-
-demo.launch(share=True)
+            if (type === 'success') {
+                box.classList.add('bg-emerald-100', 'text-emerald-800');
+            } else {
+                box.classList.add('bg-red-100', 'text-red-800');
+            }
+        }
+    </script>
+</body>
+</html>
